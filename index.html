@@ -56,16 +56,16 @@ function lookup(query){
 document.querySelector('form').onsubmit=e=>{e.preventDefault();const s=entry.value.trim();if(!s)return;entry.value='';message(s,true);if(!testing||s.includes('?')){lookup(s);return}const l=current(),missing=l[3].filter(group=>!group.split('|').some(w=>norm(s).includes(w)));message((missing.length?'Repères à vérifier dans ta réponse : '+missing.map(w=>w.split('|')[0]).join(', ')+'.':'J’ai repéré les termes attendus. Vérifie aussi le sens de chaque relation.')+'\n\nRéponse modèle : '+l[1]+'\n\nReformule avec tes mots ou passe à la notion suivante.');};
 el('mic').onclick=()=>{if(recognition){recognition.stop();return}const R=window.SpeechRecognition||window.webkitSpeechRecognition;if(!R){el('status').textContent='Dictée indisponible dans ce navigateur. Utilise le clavier.';return}professorVoice.stop();const r=new R();recognition=r;r.lang='fr-FR';r.onstart=()=>{el('mic').textContent='Arrêter la dictée';el('status').textContent='À toi de parler…'};r.onresult=e=>{entry.value+=(entry.value?' ':'')+e.results[0][0].transcript;el('status').textContent='Relis puis envoie ta réponse.'};r.onerror=e=>el('status').textContent=e.error==='not-allowed'?'Accès au micro refusé. Tu peux répondre au clavier.':'Dictée interrompue. Réessaie ou écris ta réponse.';r.onend=()=>{recognition=null;el('mic').textContent='Dicter au micro'};try{r.start()}catch{recognition=null;el('status').textContent='Micro indisponible.'}};
 message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’explique le mécanisme ou que je te pose une question comme au jury ?');
-</script><script>window.GIULIA_GLB='giulia.glb';window.GIULIA_FACE='giulia-face.webp'</script><script>/* Giulia en 3D (Three.js) : même interface que l'ancien avatar3d.js
+</script><script>window.GIULIA_GLB='giulia-v2.glb';window.GIULIA_FACE='giulia-face.webp'</script><script>/* Giulia en 3D (Three.js) : même interface que l'ancien avatar3d.js
    (act, setPose, pointAt, setView, focusBoard, setEnabled, setAutomatic, dispose).
    Deux apparences :
-   - giulia.glb (modèle articulé, animations squelettiques fondues) quand il existe ;
+   - giulia-v2.glb (modèle articulé, animations squelettiques fondues) quand il existe ;
    - sinon les photos de Giulia, posées dans la scène 3D comme des panneaux tournés vers la caméra : vraie
      perspective, ombre portée de sa silhouette, déplacements continus ; l'image suit sa direction réelle
      (face, trois-quarts, dos, pas de marche) avec des fondus. */
 (() => {
   "use strict";
-  const MODELE = window.GIULIA_GLB || null;   // 'giulia.glb' une fois le modèle articulé prêt ; sinon les photos
+  const MODELE = window.GIULIA_GLB || null;   // 'giulia-v2.glb' une fois le modèle articulé prêt ; sinon les photos
   const VITESSE = 1.05;            // m/s de marche
   const TAILLE = 1.68;             // hauteur de Giulia en mètres
   const PAS = .38;                 // longueur d'un pas (m) : rythme des images de marche et du balancement
@@ -88,23 +88,29 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
   async function demarrer(canvas) {
     const THREE = await import('three');
     const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
-    const { RoomEnvironment } = await import('three/addons/environments/RoomEnvironment.js');
-    const stage = canvas.closest('.stage');
-
-    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
-    renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    const scene = new THREE.Scene();
-    scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), .04).texture;
-    const camera = new THREE.PerspectiveCamera(28, 2, .1, 50);
-
-    scene.add(new THREE.HemisphereLight(0xfff4e6, 0x8a7a60, .55));
-    const soleil = new THREE.DirectionalLight(0xfff1dc, 2.2);
-    soleil.position.set(-3.2, 4.2, 2); soleil.castShadow = true;   // de côté : l'ombre s'étire sur le sol, visible
-    soleil.shadow.mapSize.set(2048, 2048); soleil.shadow.camera.left = -4; soleil.shadow.camera.right = 4;
-    soleil.shadow.camera.top = 4; soleil.shadow.camera.bottom = -2; soleil.shadow.bias = -.0004; soleil.shadow.radius = 4;
-    scene.add(soleil, soleil.target);
+    const stage=canvas.closest('.stage');
+    const renderer=new THREE.WebGLRenderer({canvas,alpha:true,antialias:true});
+    renderer.outputColorSpace=THREE.SRGBColorSpace;
+    renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.08;
+    renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+    const scene=new THREE.Scene(), camera=new THREE.PerspectiveCamera(28,2,.1,50);
+    const studio=new THREE.Scene();studio.background=new THREE.Color(0x161922);
+    for(const [color,w,h,pos,rot] of [[0xfff4e6,6,4,[4,4,4],[0,-Math.PI/4,0]],[0xdbe8ff,6,4,[-4,3,3],[0,Math.PI/4,0]],[0xffffff,8,8,[0,6,0],[Math.PI/2,0,0]],[0xcad8ff,5,3,[0,3,-4],[0,0,0]]]){
+      const panel=new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({color,side:THREE.DoubleSide}));
+      panel.position.set(...pos);panel.rotation.set(...rot);studio.add(panel);
+    }
+    const generator=new THREE.PMREMGenerator(renderer),environment=generator.fromScene(studio,.04);
+    scene.environment=environment.texture;generator.dispose();
+    studio.children.forEach(p=>{p.geometry.dispose();p.material.dispose()});
+    scene.add(new THREE.HemisphereLight(0xeef4ff,0x262228,.45));
+    function light(color,intensity,position,height){
+      const l=new THREE.DirectionalLight(color,intensity);l.position.set(...position);l.target.position.y=height;scene.add(l,l.target);return l;
+    }
+    const soleil=light(0xfff5e8,2.2,[1.8,2.6,2.4],1.15);
+    light(0xd6e6ff,.85,[-2.2,1.6,2],1);
+    light(0xe0ecff,1.65,[-1.1,2.3,-2.2],1.25);
+    soleil.castShadow=true;soleil.shadow.mapSize.set(2048,2048);soleil.shadow.bias=-.0004;soleil.shadow.normalBias=.02;
+    Object.assign(soleil.shadow.camera,{near:.5,far:8,left:-1.2,right:1.2,top:2,bottom:-.2});soleil.shadow.camera.updateProjectionMatrix();
     // Sol invisible qui ne garde que l'ombre : la salle dessinée de la page reste visible derrière.
     const sol = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.ShadowMaterial({ opacity: .26 }));
     sol.rotation.x = -Math.PI / 2; sol.receiveShadow = true; scene.add(sol);
@@ -134,18 +140,15 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
     if (gltf) {
       scene.add(chaise);
       const perso = gltf.scene;
-      // Texture = ses photos projetées, éclairage déjà dedans : matériau non éclairé (sinon visage terne, double ombrage).
-      perso.traverse((o) => { if (o.isMesh) {
-        o.castShadow = true; o.frustumCulled = false;
-        if (o.material?.map) {
-          o.material.map.anisotropy = renderer.capabilities.getMaxAnisotropy();   // reste net vu de biais
-          o.material = new THREE.MeshBasicMaterial({ map: o.material.map, toneMapped: false, transparent: true });
-          // Moins de flou de loin : la carte graphique lit un niveau de détail plus fin de la texture (biais -0,7).
-          o.material.onBeforeCompile = (s) => { s.fragmentShader = s.fragmentShader.replace('#include <map_fragment>',
-            '#ifdef USE_MAP\n\tdiffuseColor *= texture2D( map, vMapUv, -0.7 );\n#endif'); };
-          materiauxModele.push(o.material);
+      perso.traverse(o=>{
+        if(!o.isMesh)return;
+        o.castShadow=o.receiveShadow=true;o.frustumCulled=false;
+        for(const m of [].concat(o.material||[])){
+          m.envMapIntensity=.85;m.transparent=true;
+          for(const tex of [m.map,m.roughnessMap,m.normalMap])if(tex)tex.anisotropy=renderer.capabilities.getMaxAnisotropy();
+          materiauxModele.push(m);
         }
-      } });
+      });
       const b = new THREE.Box3().setFromObject(perso);
       perso.scale.setScalar(TAILLE / (b.max.y - b.min.y || 1)); perso.position.y = -b.min.y * perso.scale.y;
       corps.add(perso);
@@ -240,7 +243,7 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
       requestAnimationFrame(boucle);
       const dt = Math.min(horloge.getDelta(), .05);
       if (!enabled || document.hidden) return;
-      const r = canvas.getBoundingClientRect(), dpr = 2, taille = `${r.width}x${r.height}x${dpr}`;   // rendu 2× puis réduit par le navigateur : plus net
+      const r = canvas.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1,2), taille = `${r.width}x${r.height}x${dpr}`;   // rendu 2× puis réduit par le navigateur : plus net
       if (taille !== tailleRendu) { // comparer la taille CSS : canvas.width est arrondi par Three.js
         tailleRendu = taille; renderer.setPixelRatio(dpr); renderer.setSize(r.width, r.height, false);
         camera.aspect = r.width / Math.max(1, r.height); camera.updateProjectionMatrix();
@@ -281,7 +284,7 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
       const k = 1 - Math.exp(-dt * 2.6);
       camera.position.lerp(camPos, k); viseActuel.lerp(camVise, k); camera.lookAt(viseActuel);
       if (photo) affiche.maj(dt, etatPhoto());
-      soleil.target.position.copy(corps.position); contact.position.x = corps.position.x; contact.position.z = corps.position.z;
+      soleil.target.position.copy(corps.position); soleil.target.position.y+=1.15; soleil.position.set(corps.position.x+1.8,corps.position.y+2.6,corps.position.z+2.4); contact.position.x = corps.position.x; contact.position.z = corps.position.z;
       contact.visible = !(photo && /^g,3/.test(affiche.cle));   // assise : la chaise de la photo porte déjà son ombre
       renderer.render(scene, camera);
     }
@@ -311,7 +314,7 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
       setAutomatic(v) { auto = !!v; inactif = 0; },
       setEnabled(v) { enabled = !!v; },
       setView(v) { vue = v === 'close' ? 'close' : 'large'; },
-      dispose() { mort = true; renderer.dispose(); },
+      dispose() { mort = true; environment.dispose(); renderer.dispose(); },
       _debug: { corps, camera, actions, lieu, photo, etatPhoto, contact, renderer, scene, THREE, get vitesse() { return vitesse; }, get affichee() { return affiche?.cle; } },
     };
   }
