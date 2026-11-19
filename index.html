@@ -56,7 +56,7 @@ function lookup(query){
 document.querySelector('form').onsubmit=e=>{e.preventDefault();const s=entry.value.trim();if(!s)return;entry.value='';message(s,true);if(!testing||s.includes('?')){lookup(s);return}const l=current(),missing=l[3].filter(group=>!group.split('|').some(w=>norm(s).includes(w)));message((missing.length?'Repères à vérifier dans ta réponse : '+missing.map(w=>w.split('|')[0]).join(', ')+'.':'J’ai repéré les termes attendus. Vérifie aussi le sens de chaque relation.')+'\n\nRéponse modèle : '+l[1]+'\n\nReformule avec tes mots ou passe à la notion suivante.');};
 el('mic').onclick=()=>{if(recognition){recognition.stop();return}const R=window.SpeechRecognition||window.webkitSpeechRecognition;if(!R){el('status').textContent='Dictée indisponible dans ce navigateur. Utilise le clavier.';return}professorVoice.stop();const r=new R();recognition=r;r.lang='fr-FR';r.onstart=()=>{el('mic').textContent='Arrêter la dictée';el('status').textContent='À toi de parler…'};r.onresult=e=>{entry.value+=(entry.value?' ':'')+e.results[0][0].transcript;el('status').textContent='Relis puis envoie ta réponse.'};r.onerror=e=>el('status').textContent=e.error==='not-allowed'?'Accès au micro refusé. Tu peux répondre au clavier.':'Dictée interrompue. Réessaie ou écris ta réponse.';r.onend=()=>{recognition=null;el('mic').textContent='Dicter au micro'};try{r.start()}catch{recognition=null;el('status').textContent='Micro indisponible.'}};
 message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’explique le mécanisme ou que je te pose une question comme au jury ?');
-</script><script>window.GIULIA_GLB='giulia.glb'</script><script>/* Giulia en 3D (Three.js) : même interface que l'ancien avatar3d.js
+</script><script>window.GIULIA_GLB='giulia.glb';window.GIULIA_FACE='giulia-face.webp'</script><script>/* Giulia en 3D (Three.js) : même interface que l'ancien avatar3d.js
    (act, setPose, pointAt, setView, focusBoard, setEnabled, setAutomatic, dispose).
    Deux apparences :
    - giulia.glb (modèle articulé, animations squelettiques fondues) quand il existe ;
@@ -129,6 +129,7 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
     const photo = !gltf;
     let mixer = null, actions = {}, courante = null, roleCourant = 'idle', debutRole = 0;
     let affiche = null;   // apparence photo
+    let photoRepos = null, fonduRepos = 0, calme = 0; const materiauxModele = [];   // photo nette au repos (modèle 3D)
 
     if (gltf) {
       scene.add(chaise);
@@ -138,12 +139,26 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
         o.castShadow = true; o.frustumCulled = false;
         if (o.material?.map) {
           o.material.map.anisotropy = renderer.capabilities.getMaxAnisotropy();   // reste net vu de biais
-          o.material = new THREE.MeshBasicMaterial({ map: o.material.map, toneMapped: false });
+          o.material = new THREE.MeshBasicMaterial({ map: o.material.map, toneMapped: false, transparent: true });
+          // Moins de flou de loin : la carte graphique lit un niveau de détail plus fin de la texture (biais -0,7).
+          o.material.onBeforeCompile = (s) => { s.fragmentShader = s.fragmentShader.replace('#include <map_fragment>',
+            '#ifdef USE_MAP\n\tdiffuseColor *= texture2D( map, vMapUv, -0.7 );\n#endif'); };
+          materiauxModele.push(o.material);
         }
       } });
       const b = new THREE.Box3().setFromObject(perso);
       perso.scale.setScalar(TAILLE / (b.max.y - b.min.y || 1)); perso.position.y = -b.min.y * perso.scale.y;
       corps.add(perso);
+      // Au repos, de face : sa vraie photo (qualité de l'image d'origine) posée à l'endroit exact du modèle ;
+      // le modèle 3D reprend dès qu'elle bouge (fondu court).
+      const texFace = window.GIULIA_FACE && await new Promise((ok) => new THREE.TextureLoader().load(window.GIULIA_FACE,
+        (t) => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); ok(t); }, undefined, () => ok(null)));
+      if (texFace) {
+        const h = TAILLE * 1.004, w = h * texFace.image.width / texFace.image.height;
+        const g = new THREE.PlaneGeometry(w, h); g.translate(0, h / 2, 0);
+        photoRepos = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: texFace, transparent: true, opacity: 0, depthWrite: false, depthTest: false, toneMapped: false }));
+        photoRepos.renderOrder = 10; photoRepos.visible = false; scene.add(photoRepos);
+      }
       // La marche est forcée « en place » : c'est le code qui déplace Giulia, sans glisser.
       mixer = new THREE.AnimationMixer(perso);
       for (const [role, re] of Object.entries(ROLES)) {
@@ -225,7 +240,7 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
       requestAnimationFrame(boucle);
       const dt = Math.min(horloge.getDelta(), .05);
       if (!enabled || document.hidden) return;
-      const r = canvas.getBoundingClientRect(), dpr = Math.min(Math.max(devicePixelRatio || 1, 1.5), 2), taille = `${r.width}x${r.height}x${dpr}`;   // au moins 1,5× : plus net
+      const r = canvas.getBoundingClientRect(), dpr = 2, taille = `${r.width}x${r.height}x${dpr}`;   // rendu 2× puis réduit par le navigateur : plus net
       if (taille !== tailleRendu) { // comparer la taille CSS : canvas.width est arrondi par Three.js
         tailleRendu = taille; renderer.setPixelRatio(dpr); renderer.setSize(r.width, r.height, false);
         camera.aspect = r.width / Math.max(1, r.height); camera.updateProjectionMatrix();
@@ -253,6 +268,14 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
         if (window.giuliaTalking && courante === actions.idle && actions.talk && !cible && !occupe) jouer('talk');
         else if (!window.giuliaTalking && courante === actions.talk && !pointe) jouer('idle');
         mixer.update(dt);
+        if (photoRepos) {   // repos de face depuis 0,35 s → photo ; sinon modèle 3D (le modèle reste dessous jusqu'au fondu complet)
+          const auRepos = !cible && !occupe && roleCourant === 'idle' && !pointe && !assise && Math.abs(angle(corps.rotation.y)) < .06;
+          calme = auRepos ? calme + dt : 0;
+          fonduRepos += ((calme > .35 ? 1 : 0) - fonduRepos) * (1 - Math.exp(-dt * 9));
+          photoRepos.visible = fonduRepos > .01; photoRepos.material.opacity = fonduRepos;
+          photoRepos.position.copy(corps.position); photoRepos.rotation.y = corps.rotation.y;
+          for (const m of materiauxModele) m.opacity = fonduRepos > .97 ? 0 : 1;
+        }
       }
       cadre(camPos, camVise);
       const k = 1 - Math.exp(-dt * 2.6);
