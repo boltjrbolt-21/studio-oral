@@ -135,7 +135,6 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
     const photo = !gltf;
     let mixer = null, actions = {}, courante = null, roleCourant = 'idle', debutRole = 0;
     let affiche = null;   // apparence photo
-    let photoRepos = null, fonduRepos = 0, calme = 0; const materiauxModele = [];   // photo nette au repos (modèle 3D)
 
     if (gltf) {
       scene.add(chaise);
@@ -144,24 +143,13 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
         if(!o.isMesh)return;
         o.castShadow=o.receiveShadow=true;o.frustumCulled=false;
         for(const m of [].concat(o.material||[])){
-          m.envMapIntensity=.85;m.transparent=true;
+          m.envMapIntensity=.85;
           for(const tex of [m.map,m.roughnessMap,m.normalMap])if(tex)tex.anisotropy=renderer.capabilities.getMaxAnisotropy();
-          materiauxModele.push(m);
         }
       });
       const b = new THREE.Box3().setFromObject(perso);
       perso.scale.setScalar(TAILLE / (b.max.y - b.min.y || 1)); perso.position.y = -b.min.y * perso.scale.y;
       corps.add(perso);
-      // Au repos, de face : sa vraie photo (qualité de l'image d'origine) posée à l'endroit exact du modèle ;
-      // le modèle 3D reprend dès qu'elle bouge (fondu court).
-      const texFace = window.GIULIA_FACE && await new Promise((ok) => new THREE.TextureLoader().load(window.GIULIA_FACE,
-        (t) => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); ok(t); }, undefined, () => ok(null)));
-      if (texFace) {
-        const h = TAILLE * 1.004, w = h * texFace.image.width / texFace.image.height;
-        const g = new THREE.PlaneGeometry(w, h); g.translate(0, h / 2, 0);
-        photoRepos = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: texFace, transparent: true, opacity: 0, depthWrite: false, depthTest: false, toneMapped: false }));
-        photoRepos.renderOrder = 10; photoRepos.visible = false; scene.add(photoRepos);
-      }
       // La marche est forcée « en place » : c'est le code qui déplace Giulia, sans glisser.
       mixer = new THREE.AnimationMixer(perso);
       for (const [role, re] of Object.entries(ROLES)) {
@@ -271,14 +259,6 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
         if (window.giuliaTalking && courante === actions.idle && actions.talk && !cible && !occupe) jouer('talk');
         else if (!window.giuliaTalking && courante === actions.talk && !pointe) jouer('idle');
         mixer.update(dt);
-        if (photoRepos) {   // repos de face depuis 0,35 s → photo ; sinon modèle 3D (le modèle reste dessous jusqu'au fondu complet)
-          const auRepos = !cible && !occupe && roleCourant === 'idle' && !pointe && !assise && Math.abs(angle(corps.rotation.y)) < .06;
-          calme = auRepos ? calme + dt : 0;
-          fonduRepos += ((calme > .35 ? 1 : 0) - fonduRepos) * (1 - Math.exp(-dt * 4.5));   // ~0,5 s : pas de saut de netteté
-          photoRepos.visible = fonduRepos > .01; photoRepos.material.opacity = fonduRepos;
-          photoRepos.position.copy(corps.position); photoRepos.rotation.y = corps.rotation.y;
-          for (const m of materiauxModele) m.opacity = fonduRepos > .97 ? 0 : 1;
-        }
       }
       cadre(camPos, camVise);
       const k = 1 - Math.exp(-dt * 2.6);
@@ -334,32 +314,31 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
       const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ transparent: true, alphaTest: .02, depthWrite: false, toneMapped: false }));
       m.renderOrder = ordre; scene.add(m); return m;
     };
-    const vue = panneau(1), fond = panneau(2);   // fond = ancienne image qui s'efface au-dessus
+    const vue = panneau(1);   // fond = ancienne image qui s'efface au-dessus
     vue.castShadow = true;
     vue.customDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, alphaTest: .5 });
-    fond.visible = false;
-    let cle = '', fondu = 1;
-    const FONDU = .28;
+
+    let cle = '';
+
     function poser(m, [type, i, echelle = 1, miroir = false]) {
       const tex = textures[type][i] || textures.p[0];
       m.material.map = tex; m.material.needsUpdate = true;
       m.scale.set(miroir ? -echelle : echelle, echelle, 1);
       if (m === vue) { vue.customDepthMaterial.map = tex; vue.customDepthMaterial.needsUpdate = true; }
     }
-    let precedente = null;
+
     return {
       get cle() { return cle; },
       maj(dt, { image, position, vers, marche, foulee }) {
         const nouvelle = image.join(',');
         if (nouvelle !== cle) {
-          if (precedente) { poser(fond, precedente); fond.visible = true; fond.material.opacity = 1; fondu = 0; }
-          poser(vue, image); cle = nouvelle; precedente = image;
+          poser(vue, image); cle = nouvelle;
         }
-        if (fondu < 1) { fondu = Math.min(1, fondu + dt / FONDU); fond.material.opacity = 1 - fondu * fondu * (3 - 2 * fondu); if (fondu >= 1) fond.visible = false; }
         // Haut-bas et léger roulis de la marche, au rythme des pas réellement faits.
         const bas = marche ? Math.abs(Math.sin(foulee / PAS * Math.PI)) * .022 * Math.min(1, marche / .5) : 0;
         const roulis = marche ? Math.sin(foulee / PAS * Math.PI) * .012 : 0;
-        for (const m of [vue, fond]) { m.position.set(position.x, position.y + bas, position.z); m.rotation.set(0, vers, roulis); }
+        vue.position.set(position.x, position.y + bas, position.z);
+        vue.rotation.set(0, vers, roulis);
       },
     };
   }
