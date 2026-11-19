@@ -56,16 +56,16 @@ function lookup(query){
 document.querySelector('form').onsubmit=e=>{e.preventDefault();const s=entry.value.trim();if(!s)return;entry.value='';message(s,true);if(!testing||s.includes('?')){lookup(s);return}const l=current(),missing=l[3].filter(group=>!group.split('|').some(w=>norm(s).includes(w)));message((missing.length?'Repères à vérifier dans ta réponse : '+missing.map(w=>w.split('|')[0]).join(', ')+'.':'J’ai repéré les termes attendus. Vérifie aussi le sens de chaque relation.')+'\n\nRéponse modèle : '+l[1]+'\n\nReformule avec tes mots ou passe à la notion suivante.');};
 el('mic').onclick=()=>{if(recognition){recognition.stop();return}const R=window.SpeechRecognition||window.webkitSpeechRecognition;if(!R){el('status').textContent='Dictée indisponible dans ce navigateur. Utilise le clavier.';return}professorVoice.stop();const r=new R();recognition=r;r.lang='fr-FR';r.onstart=()=>{el('mic').textContent='Arrêter la dictée';el('status').textContent='À toi de parler…'};r.onresult=e=>{entry.value+=(entry.value?' ':'')+e.results[0][0].transcript;el('status').textContent='Relis puis envoie ta réponse.'};r.onerror=e=>el('status').textContent=e.error==='not-allowed'?'Accès au micro refusé. Tu peux répondre au clavier.':'Dictée interrompue. Réessaie ou écris ta réponse.';r.onend=()=>{recognition=null;el('mic').textContent='Dicter au micro'};try{r.start()}catch{recognition=null;el('status').textContent='Micro indisponible.'}};
 message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’explique le mécanisme ou que je te pose une question comme au jury ?');
-</script><script>window.GIULIA_GLB='giulia-detail.glb';window.GIULIA_FACE='giulia-face.webp'</script><script>/* Giulia en 3D (Three.js) : même interface que l'ancien avatar3d.js
+</script><script>window.GIULIA_GLB='giulia-mouvement.glb';window.GIULIA_FACE='giulia-face.webp'</script><script>/* Giulia en 3D (Three.js) : même interface que l'ancien avatar3d.js
    (act, setPose, pointAt, setView, focusBoard, setEnabled, setAutomatic, dispose).
    Deux apparences :
-   - giulia-detail.glb (modèle articulé, animations squelettiques fondues) quand il existe ;
+   - giulia-mouvement.glb (modèle articulé, animations squelettiques fondues) quand il existe ;
    - sinon les photos de Giulia, posées dans la scène 3D comme des panneaux tournés vers la caméra : vraie
      perspective, ombre portée de sa silhouette, déplacements continus ; l'image suit sa direction réelle
      (face, trois-quarts, dos, pas de marche) avec des fondus. */
 (() => {
   "use strict";
-  const MODELE = window.GIULIA_GLB || null;   // 'giulia-detail.glb' une fois le modèle articulé prêt ; sinon les photos
+  const MODELE = window.GIULIA_GLB || null;   // 'giulia-mouvement.glb' une fois le modèle articulé prêt ; sinon les photos
   const VITESSE = 1.05;            // m/s de marche
   const TAILLE = 1.68;             // hauteur de Giulia en mètres
   const PAS = .38;                 // longueur d'un pas (m) : rythme des images de marche et du balancement
@@ -143,6 +143,14 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
         if(!o.isMesh)return;
         o.castShadow=o.receiveShadow=true;o.frustumCulled=false;
         for(const m of [].concat(o.material||[])){
+          if(o.geometry.hasAttribute('_sidefix')){
+            m.onBeforeCompile = shader => {
+              shader.vertexShader = 'attribute vec4 _sidefix; varying vec4 vSideFix;\n' +
+                shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvSideFix = _sidefix;');
+              shader.fragmentShader = 'varying vec4 vSideFix;\n' +
+                shader.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb = mix(diffuseColor.rgb, vSideFix.rgb, vSideFix.a);');
+            };
+          }
           m.envMapIntensity=.85;
           for(const tex of [m.map,m.roughnessMap,m.normalMap])if(tex)tex.anisotropy=renderer.capabilities.getMaxAnisotropy();
         }
