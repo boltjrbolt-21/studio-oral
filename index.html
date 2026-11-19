@@ -271,7 +271,7 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
         if (photoRepos) {   // repos de face depuis 0,35 s → photo ; sinon modèle 3D (le modèle reste dessous jusqu'au fondu complet)
           const auRepos = !cible && !occupe && roleCourant === 'idle' && !pointe && !assise && Math.abs(angle(corps.rotation.y)) < .06;
           calme = auRepos ? calme + dt : 0;
-          fonduRepos += ((calme > .35 ? 1 : 0) - fonduRepos) * (1 - Math.exp(-dt * 9));
+          fonduRepos += ((calme > .35 ? 1 : 0) - fonduRepos) * (1 - Math.exp(-dt * 4.5));   // ~0,5 s : pas de saut de netteté
           photoRepos.visible = fonduRepos > .01; photoRepos.material.opacity = fonduRepos;
           photoRepos.position.copy(corps.position); photoRepos.rotation.y = corps.rotation.y;
           for (const m of materiauxModele) m.opacity = fonduRepos > .97 ? 0 : 1;
