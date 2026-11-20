@@ -112,14 +112,19 @@ function passagesProches(query, n = 2){
  return notes.map(x=>{const t=norm(x.s);return{x,score:words.reduce((s,w)=>s+(t.includes(w)?1+Math.min(3,t.split(w).length-2)*.2:0),0)}}).filter(m=>m.score>0).sort((a,b)=>b.score-a.score).slice(0,n).map(m=>m.x);
 }
 const nettoyer = t => t.replace(/<pensee>[\s\S]*?(<\/[^>]*>|\n\n)/i,'').replace(/<souvenir>[\s\S]*?<\/souvenir>/gi,'').replace(/^\s*<pensee>[\s\S]*$/i,'').trim();
-async function demanderLueur(question){
- const extraits = passagesProches(question);
- const consigne = 'Tu es Giulia, professeure de physiologie en 2e année de pharmacie (DFGSP2). Réponds à la question de ton étudiant'
-  + ' de façon rigoureuse et claire, comme à l’oral : commence directement par la définition précise (sans salutation ni présentation), puis le mécanisme, en 4 à 8 phrases, sans liste à puces ni tableau.'
-  + ' Appuie-toi en priorité sur les extraits de SA fiche ci-dessous ; n’invente rien, et si la fiche ne contient pas l’information, dis-le.'
+// Réponse d'oral à corriger (mode « Interroge-moi ») : q = question posée, attendu = réponse de la fiche.
+async function demanderLueur(question, oral){
+ const extraits = passagesProches(oral ? oral.q + ' ' + oral.attendu : question);
+ const consigne = 'Tu es Giulia, professeure de physiologie en 2e année de pharmacie (DFGSP2) ; tu tutoies ton étudiant. '
+  + (oral
+    ? 'Tu fais passer un oral. Corrige la réponse de ton étudiant comme à l’oral, directement (sans salutation) : dis ce qui est juste, ce qui manque ou est faux, puis donne la réponse attendue, en 3 à 6 phrases, sans liste à puces ni tableau.'
+      + ' Base-toi sur la réponse attendue et les extraits de SA fiche ; n’invente rien.'
+    : 'Réponds à la question de ton étudiant de façon rigoureuse et claire, comme à l’oral : commence directement par la définition précise (sans salutation ni présentation), puis le mécanisme, en 4 à 8 phrases, sans liste à puces ni tableau.'
+      + ' Appuie-toi en priorité sur les extraits de SA fiche ci-dessous ; n’invente rien, et si la fiche ne contient pas l’information, dis-le.')
   + '\nNotion en cours : « ' + current().titre + ' ».'
   + extraits.map(x => '\n\n[Fiche, p. ' + x.p + ']\n' + x.s.slice(0, 1800)).join('')
-  + '\n\nQuestion de l’étudiant : ' + question;
+  + (oral ? '\n\nQuestion posée : ' + oral.q + '\nRéponse attendue (fiche) : ' + oral.attendu + '\nRéponse de l’étudiant : ' + question
+          : '\n\nQuestion de l’étudiant : ' + question);
  const box=document.createElement('div'),nom=document.createElement('b'),texte=document.createTextNode('');box.className='msg';nom.textContent='Giulia · Lueur';box.append(nom,texte);chat.append(box);chat.scrollTop=chat.scrollHeight;
  const debut=Date.now();let recu=false;const attente=setInterval(()=>{if(!recu)el('status').textContent='Lueur réfléchit… '+Math.round((Date.now()-debut)/1000)+' s (modèle local sur ton PC)'},1000);
  let brut='';
@@ -138,13 +143,23 @@ async function demanderLueur(question){
   echanges.push({role:'user',content:question},{role:'assistant',content:reponse});
   if(spoken&&navigator.userActivation?.hasBeenActive)professorVoice.speak(reponse);
  }catch(err){
-  clearInterval(attente);box.remove();el('status').textContent='Lueur n’est pas lancée sur ce PC (ou ne répond pas) : réponse tirée de ta fiche.';
-  lookup(question);
+  clearInterval(attente);box.remove();
+  // TypeError = la requête n'est jamais arrivée : Lueur éteinte, ou navigateur qui bloque l'accès au PC (Brave par défaut).
+  el('status').textContent=err instanceof TypeError
+   ?'Lueur injoignable : lance Lueur sur ce PC. Sous Brave, autorise « Accès à localhost » pour ce site (icône à gauche de l’adresse, puis Paramètres du site), puis recharge.'
+   :'Lueur ne répond pas ('+err.message+') : réponse tirée de ta fiche.';
+  if(oral)corrigerParMots(question,oral);else lookup(question);
  }
 }
-document.querySelector('form').onsubmit=e=>{e.preventDefault();const s=entry.value.trim();if(!s)return;entry.value='';message(s,true);if(!testing||s.includes('?')){demanderLueur(s);return}
- const l=current(),q=questionCourante(),missing=q.m.filter(group=>!group.split('|').some(w=>norm(s).includes(w)));
- message((missing.length?'Repères à vérifier dans ta réponse : '+missing.map(w=>w.split('|')[0]).join(', ')+'.':'J’ai repéré les termes attendus. Vérifie aussi le sens de chaque relation.')+'\n\nRéponse de ta fiche : '+q.r+'\n\n'+(l.questions.length>1?'Clique « Interroge-moi » pour la question suivante.':'Reformule avec tes mots ou passe à la notion suivante.'));
+const QUESTION=/\?|^(c.?est quoi|qu.?est.?ce|quel|quelle|pourquoi|comment|explique|expliquer|definis|definir|definition|que veut|a quoi|donne|peux.?tu|parle)/;
+function corrigerParMots(s,oral){
+ const missing=oral.m.filter(group=>!group.split('|').some(w=>norm(s).includes(w)));
+ message((missing.length?'Repères à vérifier dans ta réponse : '+missing.map(w=>w.split('|')[0]).join(', ')+'.':'J’ai repéré les termes attendus. Vérifie aussi le sens de chaque relation.')+'\n\nRéponse de ta fiche : '+oral.attendu);
+}
+document.querySelector('form').onsubmit=e=>{e.preventDefault();const s=entry.value.trim();if(!s)return;entry.value='';message(s,true);
+ if(!testing||QUESTION.test(norm(s))){demanderLueur(s);return}
+ const l=current(),q=questionCourante();
+ demanderLueur(s,{q:q.q,attendu:q.r,m:q.m});
  rang.set(l,(rang.get(l)||0)+1);};
 el('mic').onclick=()=>{if(recognition){recognition.stop();return}const R=window.SpeechRecognition||window.webkitSpeechRecognition;if(!R){el('status').textContent='Dictée indisponible dans ce navigateur. Utilise le clavier.';return}professorVoice.stop();const r=new R();recognition=r;r.lang='fr-FR';r.onstart=()=>{el('mic').textContent='Arrêter la dictée';el('status').textContent='À toi de parler…'};r.onresult=e=>{entry.value+=(entry.value?' ':'')+e.results[0][0].transcript;el('status').textContent='Relis puis envoie ta réponse.'};r.onerror=e=>el('status').textContent=e.error==='not-allowed'?'Accès au micro refusé. Tu peux répondre au clavier.':'Dictée interrompue. Réessaie ou écris ta réponse.';r.onend=()=>{recognition=null;el('mic').textContent='Dicter au micro'};try{r.start()}catch{recognition=null;el('status').textContent='Micro indisponible.'}};
 message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’explique le mécanisme ou que je te pose une question comme au jury ?');
