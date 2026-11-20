@@ -100,13 +100,55 @@ function lookup(query){
  const hit=matches[0];if(!hit?.score){message('Je ne retrouve pas cette notion dans ta fiche. Précise le terme du cours, par exemple « récepteurs cholinergiques ».');return}
  message('Voici le passage le plus proche dans ta fiche (p. '+hit.n.p+').\n\n'+hit.n.s.slice(0,1500)+(hit.n.s.length>1500?'…':''))
 }
-document.querySelector('form').onsubmit=e=>{e.preventDefault();const s=entry.value.trim();if(!s)return;entry.value='';message(s,true);if(!testing||s.includes('?')){lookup(s);return}
+// Questions libres (définitions, explications) : Giulia demande à Lueur, l'IA locale du PC (modèle local, rien ne part
+// sur Internet), en lui donnant les passages de la fiche les plus proches. Lueur éteinte → passage de la fiche.
+// cours:false : la recherche de cours de Lueur lisait « fiche » + « physiologie » comme une demande de fiche de synthèse
+// de toute la matière (lecture des 54 CM, très long). Les extraits envoyés suffisent et viennent de la fiche complète.
+const LUEUR = 'http://127.0.0.1:5180';
+const LUEUR_MODELE = 'local:gemma4:12b';
+const echanges = [];   // derniers échanges avec Lueur (contexte de la conversation)
+function passagesProches(query, n = 2){
+ const words=[...new Set(norm(query).match(/[a-z0-9+]{3,}/g)||[])].filter(w=>!['est','les','une','dans','pour','quel','quelle','comment','explique','moi','quoi','que','des','pourquoi','peux','sont','cours','sur','avec','difference','entre','parle','sert','role','effet','quels','quelles'].includes(w));
+ return notes.map(x=>{const t=norm(x.s);return{x,score:words.reduce((s,w)=>s+(t.includes(w)?1+Math.min(3,t.split(w).length-2)*.2:0),0)}}).filter(m=>m.score>0).sort((a,b)=>b.score-a.score).slice(0,n).map(m=>m.x);
+}
+const nettoyer = t => t.replace(/<pensee>[\s\S]*?(<\/[^>]*>|\n\n)/i,'').replace(/<souvenir>[\s\S]*?<\/souvenir>/gi,'').replace(/^\s*<pensee>[\s\S]*$/i,'').trim();
+async function demanderLueur(question){
+ const extraits = passagesProches(question);
+ const consigne = 'Tu es Giulia, professeure de physiologie en 2e année de pharmacie (DFGSP2). Réponds à la question de ton étudiant'
+  + ' de façon rigoureuse et claire, comme à l’oral : commence directement par la définition précise (sans salutation ni présentation), puis le mécanisme, en 4 à 8 phrases, sans liste à puces ni tableau.'
+  + ' Appuie-toi en priorité sur les extraits de SA fiche ci-dessous ; n’invente rien, et si la fiche ne contient pas l’information, dis-le.'
+  + '\nNotion en cours : « ' + current().titre + ' ».'
+  + extraits.map(x => '\n\n[Fiche, p. ' + x.p + ']\n' + x.s.slice(0, 1800)).join('')
+  + '\n\nQuestion de l’étudiant : ' + question;
+ const box=document.createElement('div'),nom=document.createElement('b'),texte=document.createTextNode('');box.className='msg';nom.textContent='Giulia · Lueur';box.append(nom,texte);chat.append(box);chat.scrollTop=chat.scrollHeight;
+ const debut=Date.now();let recu=false;const attente=setInterval(()=>{if(!recu)el('status').textContent='Lueur réfléchit… '+Math.round((Date.now()-debut)/1000)+' s (modèle local sur ton PC)'},1000);
+ let brut='';
+ try{
+  const r=await fetch(LUEUR+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:LUEUR_MODELE,cours:false,thinking:false,messages:[...echanges.slice(-4),{role:'user',content:consigne}]})});
+  if(!r.ok||!r.body)throw new Error('Lueur '+r.status);
+  const lecteur=r.body.pipeThrough(new TextDecoderStream()).getReader();let tampon='';
+  for(;;){const{value,done}=await lecteur.read();if(done)break;tampon+=value;let i;
+   while((i=tampon.indexOf('\n\n'))>=0){const ligne=tampon.slice(0,i);tampon=tampon.slice(i+2);if(!ligne.startsWith('data: '))continue;
+    const ev=JSON.parse(ligne.slice(6));
+    if(ev.type==='text'){recu=true;brut+=ev.v;texte.textContent=nettoyer(brut)||'…';chat.scrollTop=chat.scrollHeight}
+    else if(ev.type==='status')el('status').textContent=ev.v;
+    else if(ev.type==='error')el('status').textContent=ev.v;}}
+  clearInterval(attente);const reponse=nettoyer(brut);if(!reponse)throw new Error('réponse vide');
+  texte.textContent=reponse+(extraits.length?'\n\n(Fiche, p. '+extraits.map(x=>x.p).join(', ')+')':'');el('status').textContent='';
+  echanges.push({role:'user',content:question},{role:'assistant',content:reponse});
+  if(spoken&&navigator.userActivation?.hasBeenActive)professorVoice.speak(reponse);
+ }catch(err){
+  clearInterval(attente);box.remove();el('status').textContent='Lueur n’est pas lancée sur ce PC (ou ne répond pas) : réponse tirée de ta fiche.';
+  lookup(question);
+ }
+}
+document.querySelector('form').onsubmit=e=>{e.preventDefault();const s=entry.value.trim();if(!s)return;entry.value='';message(s,true);if(!testing||s.includes('?')){demanderLueur(s);return}
  const l=current(),q=questionCourante(),missing=q.m.filter(group=>!group.split('|').some(w=>norm(s).includes(w)));
  message((missing.length?'Repères à vérifier dans ta réponse : '+missing.map(w=>w.split('|')[0]).join(', ')+'.':'J’ai repéré les termes attendus. Vérifie aussi le sens de chaque relation.')+'\n\nRéponse de ta fiche : '+q.r+'\n\n'+(l.questions.length>1?'Clique « Interroge-moi » pour la question suivante.':'Reformule avec tes mots ou passe à la notion suivante.'));
  rang.set(l,(rang.get(l)||0)+1);};
 el('mic').onclick=()=>{if(recognition){recognition.stop();return}const R=window.SpeechRecognition||window.webkitSpeechRecognition;if(!R){el('status').textContent='Dictée indisponible dans ce navigateur. Utilise le clavier.';return}professorVoice.stop();const r=new R();recognition=r;r.lang='fr-FR';r.onstart=()=>{el('mic').textContent='Arrêter la dictée';el('status').textContent='À toi de parler…'};r.onresult=e=>{entry.value+=(entry.value?' ':'')+e.results[0][0].transcript;el('status').textContent='Relis puis envoie ta réponse.'};r.onerror=e=>el('status').textContent=e.error==='not-allowed'?'Accès au micro refusé. Tu peux répondre au clavier.':'Dictée interrompue. Réessaie ou écris ta réponse.';r.onend=()=>{recognition=null;el('mic').textContent='Dicter au micro'};try{r.start()}catch{recognition=null;el('status').textContent='Micro indisponible.'}};
 message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’explique le mécanisme ou que je te pose une question comme au jury ?');
-</script><script>window.GIULIA_GLB='giulia.glb?v=20261120b';window.GIULIA_FACE='giulia-face.webp'</script><script>/* Giulia en 3D (Three.js) : même interface que l'ancien avatar3d.js
+</script><script>window.GIULIA_GLB='giulia.glb?v=20261120d';window.GIULIA_FACE='giulia-face.webp'</script><script>/* Giulia en 3D (Three.js) : même interface que l'ancien avatar3d.js
    (act, setPose, pointAt, setView, focusBoard, setEnabled, setAutomatic, dispose).
    Deux apparences :
    - giulia.glb (modèle articulé, animations squelettiques fondues) quand il existe ;
@@ -185,6 +227,7 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
     const photo = !gltf;
     let mixer = null, actions = {}, courante = null, roleCourant = 'idle', debutRole = 0;
     let affiche = null;   // apparence photo
+    let photoRepos = null, fonduRepos = 0, calme = 0; const materiauxModele = [];   // photo nette au repos (modèle 3D)
 
     const mouth = {value:0};
     let headBone = null, gesturePhase = 0, speechWeight = 0;
@@ -240,9 +283,26 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
           for(const tex of [m.map,m.roughnessMap,m.normalMap])if(tex)tex.anisotropy=renderer.capabilities.getMaxAnisotropy();
         }
       });
+      // Notre modèle (texture = ses photos projetées, éclairage déjà dedans) : matériau NON éclairé, sinon il devient
+      // terne et brillant. Les matériaux spéciaux (« Giulia face », correction de profil) gardent leur réglage.
+      perso.traverse((o) => {
+        if (!o.isMesh || !o.material?.map || o.material.name === 'Giulia face' || o.geometry.hasAttribute('_sidefix')) return;
+        o.material = new THREE.MeshBasicMaterial({ map: o.material.map, toneMapped: false, transparent: true, side: THREE.DoubleSide });
+        materiauxModele.push(o.material);
+      });
       const b = new THREE.Box3().setFromObject(perso);
       perso.scale.setScalar(TAILLE / (b.max.y - b.min.y || 1)); perso.position.y = -b.min.y * perso.scale.y;
       corps.add(perso);
+      // Au repos, de face : sa vraie photo (qualité de l'image d'origine) à l'emplacement exact du modèle ;
+      // le modèle 3D reprend dès qu'elle bouge (fondu de 0,5 s).
+      const texFace = window.GIULIA_FACE && await new Promise((ok) => new THREE.TextureLoader().load(window.GIULIA_FACE,
+        (t) => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); ok(t); }, undefined, () => ok(null)));
+      if (texFace) {
+        const h = TAILLE * 1.004, w = h * texFace.image.width / texFace.image.height;
+        const g = new THREE.PlaneGeometry(w, h); g.translate(0, h / 2, 0);
+        photoRepos = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: texFace, transparent: true, opacity: 0, depthWrite: false, depthTest: false, toneMapped: false }));
+        photoRepos.renderOrder = 10; photoRepos.visible = false; scene.add(photoRepos);
+      }
       // La marche est forcée « en place » : c'est le code qui déplace Giulia, sans glisser.
       mixer = new THREE.AnimationMixer(perso);
       for (const [role, re] of Object.entries(ROLES)) {
@@ -332,7 +392,7 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
       requestAnimationFrame(boucle);
       const dt = Math.min(horloge.getDelta(), .05);
       if (!enabled || document.hidden) return;
-      const r = canvas.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1,2), taille = `${r.width}x${r.height}x${dpr}`;   // rendu 2× puis réduit par le navigateur : plus net
+      const r = canvas.getBoundingClientRect(), dpr = 2, taille = `${r.width}x${r.height}x${dpr}`;   // rendu 2× puis réduit par le navigateur : plus net
       if (taille !== tailleRendu) { // comparer la taille CSS : canvas.width est arrondi par Three.js
         tailleRendu = taille; renderer.setPixelRatio(dpr); renderer.setSize(r.width, r.height, false);
         camera.aspect = r.width / Math.max(1, r.height); camera.updateProjectionMatrix();
@@ -362,6 +422,14 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
         else if (!window.giuliaTalking && courante === actions.talk && !pointe) jouer('idle');
         for(const g of gestures)g.bone.quaternion.copy(g.base);
         mixer.update(dt);
+        if (photoRepos) {   // repos de face depuis 0,35 s → photo nette ; sinon modèle 3D (il reste dessous jusqu'au fondu complet)
+          const auRepos = !cible && !occupe && roleCourant === 'idle' && !pointe && !assise && !window.giuliaTalking && Math.abs(angle(corps.rotation.y)) < .06;
+          calme = auRepos ? calme + dt : 0;
+          fonduRepos += ((calme > .35 ? 1 : 0) - fonduRepos) * (1 - Math.exp(-dt * 4.5));
+          photoRepos.visible = fonduRepos > .01; photoRepos.material.opacity = fonduRepos;
+          photoRepos.position.copy(corps.position); photoRepos.rotation.y = corps.rotation.y;
+          for (const m of materiauxModele) m.opacity = fonduRepos > .97 ? 0 : 1;
+        }
         const amplitude=window.giuliaMouthLevel?.()||0;
         mouth.value+=(amplitude-mouth.value)*(1-Math.exp(-dt*30));
         speechWeight+=((window.giuliaTalking?1:0)-speechWeight)*(1-Math.exp(-dt*6));
