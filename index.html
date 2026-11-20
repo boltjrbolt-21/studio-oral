@@ -26,13 +26,31 @@
   const t=(performance.now()-wordStart)/1000;
   return Math.max(0, .12+.62*Math.sin(t*23)+.27*Math.sin(t*38));
  };
+ // Voix de Giulia : féminine, française, et « naturelle » (voix neuronales) dès que le navigateur en propose
+ // (Edge : Denise, Vivienne, Éloïse… Natural ; Chrome : Google français ; Mac : Amélie, Audrey). Jamais une voix d'homme.
+ const FEMININES=/denise|vivienne|eloise|éloïse|brigitte|celeste|céleste|coralie|jacqueline|josephine|joséphine|yvette|sylvie|ariane|charline|amelie|amélie|audrey|aurelie|aurélie|marie|hortense|julie|google fran|chantal|virginie|lea|léa|juliette|caroline/i;
+ const MASCULINES=/paul|henri|alain|claude|jerome|jérôme|maurice|remy|rémy|yves|thomas|nicolas|daniel|antoine|jean|thierry|fabrice|gerard|gérard|guillaume|felix|félix|olivier|alexandre/i;
+ const NATURELLE=/natural|neural|online|enhanced|premium|google/i;
+ let voixChoisie=null;
+ function choisirVoix(){
+  const voix=(window.speechSynthesis?.getVoices()||[]).filter(v=>/^fr/i.test(v.lang)&&!MASCULINES.test(v.name));
+  const note=v=>(NATURELLE.test(v.name)?100:0)+(FEMININES.test(v.name)?50:0)+(/fr[-_]FR/i.test(v.lang)?10:0)+(v.localService?0:5);
+  voixChoisie=voix.sort((a,b)=>note(b)-note(a))[0]||null;
+  return voixChoisie;
+ }
+ window.speechSynthesis?.addEventListener?.('voiceschanged',choisirVoix); choisirVoix();
+ // Avec une voix naturelle, elle lit tout (y compris les 6 notions enregistrées avec l'ancienne voix robotique).
+ const voixNaturelle=()=>{const v=voixChoisie||choisirVoix();return !!v&&NATURELLE.test(v.name)};
+ window.giuliaVoix=()=>voixChoisie?.name||'(aucune voix française féminine)';
  function stop(){version++;envelope='';window.giuliaTalking=false;if(player){player.onended=null;player.onerror=null;player.pause();player=null}window.speechSynthesis?.cancel()}
  function speak(line,done=()=>{}){
   stop();const id=version;
   function finish(){if(id!==version)return;window.giuliaTalking=false;done()}
   function systemVoice(){if(id!==version)return;envelope='';const engine=window.speechSynthesis;if(!engine){document.getElementById('status').textContent='La voix système est indisponible pour cette réponse.';finish();return}
-   const u=new SpeechSynthesisUtterance(line);u.lang='fr-FR';const fr=engine.getVoices().find(v=>v.lang.startsWith('fr'));if(fr)u.voice=fr;u.onstart=()=>{if(id===version){wordStart=performance.now();window.giuliaTalking=true}};u.onboundary=()=>{if(id===version)wordStart=performance.now()};u.onend=finish;u.onerror=()=>{if(id!==version)return;document.getElementById('status').textContent='Lecture vocale indisponible pour cette réponse.';finish()};engine.speak(u)}
-  if(!voiceClips[line]){systemVoice();return}
+   const u=new SpeechSynthesisUtterance(line);u.lang='fr-FR';const fr=voixChoisie||choisirVoix();if(fr){u.voice=fr;u.lang=fr.lang}
+   u.rate=NATURELLE.test(fr?.name||'')?1:.95; u.pitch=NATURELLE.test(fr?.name||'')?1:1.08;   // voix système : un peu plus posée et plus aiguë
+   u.onstart=()=>{if(id===version){wordStart=performance.now();window.giuliaTalking=true}};u.onboundary=()=>{if(id===version)wordStart=performance.now()};u.onend=finish;u.onerror=()=>{if(id!==version)return;document.getElementById('status').textContent='Lecture vocale indisponible pour cette réponse.';finish()};engine.speak(u)}
+  if(!voiceClips[line]||voixNaturelle()){systemVoice();return}
   envelope=atob(mouthEnvelopes[line]||'');player=new Audio(voiceClips[line]);player.volume=1;player.onplaying=()=>{if(version===id)window.giuliaTalking=true};player.onwaiting=player.onpause=()=>{if(id===version)window.giuliaTalking=false};player.onended=finish;player.onerror=systemVoice;player.play().catch(()=>{if(id===version&&player){player.onerror=null;systemVoice()}});
  }
  return {stop,speak};
