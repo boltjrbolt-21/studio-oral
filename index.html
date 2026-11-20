@@ -237,7 +237,8 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
       affiche = await apparencePhoto(THREE, scene);
     }
     // Gros plan : le portrait haute définition de la page (la texture du modèle est trop petite pour le visage).
-    stage?.toggleAttribute('data-photo3d', photo);
+    // Toujours le portrait net en gros plan : le visage du modèle 3D vu de près montrait oreilles, coutures et raccords.
+    stage?.toggleAttribute('data-photo3d', true);
 
     function jouer(role, fondu = .45) {
       roleCourant = role; debutRole = performance.now() / 1000;
@@ -297,7 +298,7 @@ message('Bonjour Kévin. Commençons par la synapse. Tu préfères que je t’ex
     const camPos = new THREE.Vector3(), camVise = new THREE.Vector3();
     // Caméra fixe en plan large ; le gros plan est le portrait HD de la page (texture du modèle trop petite au visage).
     function cadre(out, vise) {
-      if(vue==='close' && headBone){
+      if(false && vue==='close' && headBone){   // zoom sur la tête 3D désactivé : le portrait HD le remplace
         headBone.getWorldPosition(vise);
         vise.y-=.055;
         const distance=Math.max(1.03,.65/Math.max(.35,camera.aspect));
